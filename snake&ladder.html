@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jungle Ascent: 3D Dice Quest</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.9.1/gsap.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Arial Black', sans-serif; background: #020802; touch-action: none; }
+        
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+            box-sizing: border-box;
+            z-index: 100;
+        }
+
+        .hud-box, .controls-box, .recenter-box { pointer-events: auto; }
+
+        .hud-box {
+            background: rgba(255, 255, 255, 0.9);
+            border: 4px solid #1a1a1a;
+            box-shadow: 6px 6px 0px #2e7d32;
+            padding: 10px 20px;
+            border-radius: 4px;
+        }
+        .header { align-self: flex-start; }
+        .score-box { align-self: flex-end; text-align: center; }
+        .controls-box { align-self: center; margin-bottom: 40px; display: flex; flex-direction: column; align-items: center; gap: 15px; }
+        
+        .recenter-box {
+            position: absolute;
+            right: 20px;
+            bottom: 120px;
+        }
+
+        #recenter-btn {
+            background: #2e7d32;
+            color: white;
+            border: 3px solid #1a1a1a;
+            padding: 10px 15px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 8px;
+            box-shadow: 4px 4px 0px #1a1a1a;
+            transition: 0.1s;
+        }
+        #recenter-btn:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0px #1a1a1a; }
+
+        h1 { margin: 0; font-size: 24px; color: #1b5e20; font-style: italic; line-height: 1; }
+        p { margin: 0; font-size: 10px; color: #333; text-transform: uppercase; letter-spacing: 1px; font-weight: bold; }
+        .height-val { font-size: 42px; color: #2e7d32; line-height: 1; font-weight: 900; }
+        
+        #roll-btn {
+            background: #ffd600;
+            color: #3e2723;
+            border: 4px solid #3e2723;
+            padding: 20px 60px;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 50px;
+            box-shadow: 0px 8px 0px #c6a700;
+            transition: 0.1s;
+            user-select: none;
+            position: relative;
+            z-index: 110;
+        }
+        #roll-btn:hover { background: #ffea00; }
+        #roll-btn:disabled { background: #ccc; cursor: not-allowed; box-shadow: 0px 4px 0px #666; transform: translateY(4px); }
+        #roll-btn:active:not(:disabled) { transform: translateY(6px); box-shadow: 0px 2px 0px #3e2723; }
+        
+        #die-result {
+            font-size: 140px;
+            color: #ffd600;
+            text-shadow: 6px 6px 0px #3e2723, -2px -2px 0px #fff;
+            font-weight: 900;
+            display: none;
+            position: absolute;
+            top: 40%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 150;
+            pointer-events: none;
+        }
+
+        #power-up-status {
+            position: absolute;
+            top: 100px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+        .status-pill {
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            border: 2px solid #ffd600;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.8; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.05); }
+            100% { opacity: 0.8; transform: scale(1); }
+        }
+
+        #overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,0.85);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            z-index: 200;
+            pointer-events: auto;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div class="hud-box header">
+            <h1>NANO ASCENT</h1>
+            <p>Target: Level 100</p>
+        </div>
+
+        <div id="die-result">?</div>
+
+        <div id="power-up-status"></div>
+
+        <div class="recenter-box">
+            <button id="recenter-btn">RECENTER VIEW</button>
+        </div>
+
+        <div class="hud-box score-box">
+            <p>STEP</p>
+            <div class="height-val" id="tile-display">001</div>
+        </div>
+
+        <div class="controls-box">
+            <button id="roll-btn">ROLL DICE</button>
+        </div>
+    </div>
+
+    <div id="overlay">
+        <h2 style="font-size: 64px; color: #ffd600; margin-bottom: 20px;">CHAMPION!</h2>
+        <button onclick="location.reload()" style="padding: 15px 40px; font-weight: bold; cursor: pointer; border: none; background: #ffd600; border-radius: 10px; font-size: 20px;">RESTART QUEST</button>
+    </div>
+
+    <script>
+        let scene, camera, renderer, player;
+        let platforms = [];
+        let powerUpMeshes = {};
+        let currentTile = 1;
+        let isMoving = false;
+        
+        // Game State
+        let hasShield = false;
+        
+        // Navigation Variables
+        let isDragging = false;
+        let startY = 0;
+        let verticalOffset = 0;
+        let targetVerticalOffset = 0;
+        let isManualMode = false;
+
+        const LADDERS = { 4: 25, 13: 46, 33: 68, 50: 82, 62: 95 };
+        const SNAKES = { 27: 5, 48: 15, 70: 35, 89: 55, 99: 10 };
+        
+        // Power Up Locations
+        const SHIELDS = [10, 35, 60, 85]; // Protects from next snake
+        const BOOSTS = [20, 45, 75, 92];  // Moves forward 4 steps
+
+        window.onload = init;
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x050a05);
+            scene.fog = new THREE.FogExp2(0x050a05, 0.01);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.body.appendChild(renderer.domElement);
+
+            // Lighting
+            const amb = new THREE.AmbientLight(0x40a040, 0.5);
+            scene.add(amb);
+
+            const moon = new THREE.DirectionalLight(0xffffff, 1.2);
+            moon.position.set(50, 150, 50);
+            moon.castShadow = true;
+            moon.shadow.camera.left = -50;
+            moon.shadow.camera.right = 50;
+            moon.shadow.camera.top = 50;
+            moon.shadow.camera.bottom = -50;
+            moon.shadow.mapSize.width = 2048;
+            moon.shadow.mapSize.height = 2048;
+            scene.add(moon);
+
+            // Ground
+            const groundGeo = new THREE.PlaneGeometry(200, 200);
+            const groundMat = new THREE.MeshPhongMaterial({ color: 0x0a1a0a });
+            const ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI/2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            // Create Player
+            player = createNanoPlayer();
+            scene.add(player);
+
+            // Build Board
+            for (let i = 1; i <= 100; i++) {
+                createPlatform(i);
+                if (SHIELDS.includes(i)) createPowerUp(i, 0x00ffff); // Cyan for Shield
+                if (BOOSTS.includes(i)) createPowerUp(i, 0xff00ff);  // Magenta for Boost
+            }
+
+            // Create Assets
+            Object.entries(LADDERS).forEach(([s, e]) => createRealLadder(parseInt(s), e));
+            Object.entries(SNAKES).forEach(([s, e]) => createRealSnake(parseInt(s), e));
+
+            // Start Position
+            const startPlat = platforms[1];
+            player.position.set(startPlat.position.x, startPlat.position.y + 1, startPlat.position.z);
+
+            // UI Listeners
+            document.getElementById('roll-btn').addEventListener('click', handleRoll);
+            document.getElementById('recenter-btn').addEventListener('click', () => {
+                isManualMode = false;
+                targetVerticalOffset = 0;
+            });
+
+            // Drag/Swipe Listeners
+            window.addEventListener('mousedown', (e) => { isDragging = true; startY = e.clientY; });
+            window.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                const delta = (e.clientY - startY) * 0.1;
+                targetVerticalOffset += delta;
+                startY = e.clientY;
+                isManualMode = true;
+            });
+            window.addEventListener('mouseup', () => isDragging = false);
+
+            window.addEventListener('touchstart', (e) => { isDragging = true; startY = e.touches[0].clientY; }, {passive: false});
+            window.addEventListener('touchmove', (e) => {
+                if (!isDragging) return;
+                const delta = (e.touches[0].clientY - startY) * 0.15;
+                targetVerticalOffset += delta;
+                startY = e.touches[0].clientY;
+                isManualMode = true;
+            }, {passive: false});
+            window.addEventListener('touchend', () => isDragging = false);
+
+            animate();
+        }
+
+        function createNanoPlayer() {
+            const group = new THREE.Group();
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffd600, roughness: 0.3, metalness: 0.2 });
+            const body = new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 16), bodyMat);
+            body.scale.y = 1.3;
+            body.castShadow = true;
+            group.add(body);
+            
+            const eyeGeo = new THREE.SphereGeometry(0.12, 8, 8);
+            const eyeMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+            const e1 = new THREE.Mesh(eyeGeo, eyeMat);
+            e1.position.set(0.2, 0.3, 0.45);
+            const e2 = new THREE.Mesh(eyeGeo, eyeMat);
+            e2.position.set(-0.2, 0.3, 0.45);
+            group.add(e1, e2);
+
+            const pLight = new THREE.PointLight(0xffd600, 1, 5);
+            pLight.position.y = 1;
+            group.add(pLight);
+
+            return group;
+        }
+
+        function createPlatform(index) {
+            const angle = index * 0.45;
+            const radius = 10 + Math.sin(index * 0.1) * 3;
+            const group = new THREE.Group();
+            
+            const geo = new THREE.CylinderGeometry(1.8, 2.0, 0.8, 8);
+            const mat = new THREE.MeshStandardMaterial({ 
+                color: index === 100 ? 0xffffff : 0x334433,
+                roughness: 0.8 
+            });
+            const base = new THREE.Mesh(geo, mat);
+            base.receiveShadow = true;
+            group.add(base);
+
+            const plateGeo = new THREE.CircleGeometry(0.8, 8);
+            const plateMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+            const plate = new THREE.Mesh(plateGeo, plateMat);
+            plate.rotation.x = -Math.PI/2;
+            plate.position.y = 0.41;
+            group.add(plate);
+
+            group.position.set(Math.cos(angle) * radius, index * 1.6, Math.sin(angle) * radius);
+            scene.add(group);
+            platforms[index] = group;
+        }
+
+        function createPowerUp(idx, color) {
+            const geo = new THREE.OctahedronGeometry(0.5);
+            const mat = new THREE.MeshStandardMaterial({ 
+                color: color, 
+                emissive: color, 
+                emissiveIntensity: 0.5,
+                transparent: true,
+                opacity: 0.8
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            const plat = platforms[idx].position;
+            mesh.position.set(plat.x, plat.y + 1.5, plat.z);
+            scene.add(mesh);
+            powerUpMeshes[idx] = mesh;
+        }
+
+        function createRealLadder(startIdx, endIdx) {
+            const start = platforms[startIdx].position;
+            const end = platforms[endIdx].position;
+            const group = new THREE.Group();
+            const woodMat = new THREE.MeshStandardMaterial({ color: 0x5d4037, roughness: 0.9 });
+            const dir = new THREE.Vector3().subVectors(end, start);
+            const len = dir.length();
+            const railGeo = new THREE.BoxGeometry(0.15, len, 0.15);
+            const r1 = new THREE.Mesh(railGeo, woodMat);
+            const r2 = new THREE.Mesh(railGeo, woodMat);
+            const lookAtMatrix = new THREE.Matrix4().lookAt(start, end, new THREE.Vector3(0,1,0));
+            const quat = new THREE.Quaternion().setFromRotationMatrix(lookAtMatrix);
+            group.quaternion.copy(quat);
+            group.rotateX(Math.PI/2);
+            r1.position.set(0.6, len/2, 0);
+            r2.position.set(-0.6, len/2, 0);
+            group.add(r1, r2);
+            const rungs = Math.floor(len / 1.2);
+            const rungGeo = new THREE.CylinderGeometry(0.08, 0.08, 1.3, 8);
+            for(let i=1; i<rungs; i++) {
+                const rung = new THREE.Mesh(rungGeo, woodMat);
+                rung.position.y = (i/rungs) * len;
+                rung.rotation.z = Math.PI/2;
+                group.add(rung);
+            }
+            group.position.copy(start);
+            scene.add(group);
+        }
+
+        function createRealSnake(startIdx, endIdx) {
+            const start = platforms[startIdx].position;
+            const end = platforms[endIdx].position;
+            const points = [];
+            const segments = 30;
+            for(let i=0; i<=segments; i++) {
+                const t = i / segments;
+                const p = new THREE.Vector3().lerpVectors(start, end, t);
+                p.x += Math.sin(t * 12) * 2;
+                p.z += Math.cos(t * 12) * 2;
+                p.y += 0.5;
+                points.push(p);
+            }
+            const curve = new THREE.CatmullRomCurve3(points);
+            const tubeGeo = new THREE.TubeGeometry(curve, 64, 0.4, 12, false);
+            const snakeMat = new THREE.MeshStandardMaterial({ color: 0xc62828, emissive: 0x440000, roughness: 0.4 });
+            const snake = new THREE.Mesh(tubeGeo, snakeMat);
+            snake.castShadow = true;
+            scene.add(snake);
+            const headGeo = new THREE.SphereGeometry(0.6, 12, 12);
+            const head = new THREE.Mesh(headGeo, snakeMat);
+            head.position.copy(points[0]);
+            head.scale.set(1, 0.7, 1.3);
+            head.lookAt(points[1]);
+            const eGeo = new THREE.SphereGeometry(0.1, 8, 8);
+            const eMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+            const eye1 = new THREE.Mesh(eGeo, eMat);
+            eye1.position.set(0.3, 0.2, 0.4);
+            const eye2 = new THREE.Mesh(eGeo, eMat);
+            eye2.position.set(-0.3, 0.2, 0.4);
+            head.add(eye1, eye2);
+            scene.add(head);
+        }
+
+        function updateStatus() {
+            const container = document.getElementById('power-up-status');
+            container.innerHTML = '';
+            if (hasShield) {
+                const div = document.createElement('div');
+                div.className = 'status-pill';
+                div.innerText = '🛡️ SNAKE SHIELD ACTIVE';
+                container.appendChild(div);
+            }
+        }
+
+        function handleRoll() {
+            if (isMoving) return;
+            isManualMode = false;
+            targetVerticalOffset = 0;
+
+            const btn = document.getElementById('roll-btn');
+            const display = document.getElementById('die-result');
+            btn.disabled = true;
+            const roll = Math.floor(Math.random() * 6) + 1;
+            
+            display.style.display = 'block';
+            let count = 0;
+            const interval = setInterval(() => {
+                display.innerText = Math.floor(Math.random() * 6) + 1;
+                if (++count > 12) {
+                    clearInterval(interval);
+                    display.innerText = roll;
+                    setTimeout(() => {
+                        display.style.display = 'none';
+                        executeMove(roll);
+                    }, 600);
+                }
+            }, 60);
+        }
+
+        async function executeMove(steps) {
+            isMoving = true;
+            let target = Math.min(currentTile + steps, 100);
+
+            for (let i = currentTile + 1; i <= target; i++) {
+                await jumpTo(i, 0.35);
+                currentTile = i;
+                document.getElementById('tile-display').innerText = currentTile.toString().padStart(3, '0');
+            }
+
+            // Check Power Ups
+            if (SHIELDS.includes(currentTile)) {
+                hasShield = true;
+                updateStatus();
+                if (powerUpMeshes[currentTile]) powerUpMeshes[currentTile].visible = false;
+            } else if (BOOSTS.includes(currentTile)) {
+                if (powerUpMeshes[currentTile]) powerUpMeshes[currentTile].visible = false;
+                const boostTarget = Math.min(currentTile + 4, 100);
+                for (let i = currentTile + 1; i <= boostTarget; i++) {
+                    await jumpTo(i, 0.2);
+                    currentTile = i;
+                    document.getElementById('tile-display').innerText = currentTile.toString().padStart(3, '0');
+                }
+            }
+
+            // Check Hazards
+            if (LADDERS[currentTile]) {
+                await jumpTo(LADDERS[currentTile], 1.2, true);
+                currentTile = LADDERS[currentTile];
+            } else if (SNAKES[currentTile]) {
+                if (hasShield) {
+                    hasShield = false;
+                    updateStatus();
+                    // Just a small hop to show we are safe
+                    await jumpTo(currentTile, 0.3);
+                } else {
+                    await slideDown(SNAKES[currentTile]);
+                    currentTile = SNAKES[currentTile];
+                }
+            }
+
+            document.getElementById('tile-display').innerText = currentTile.toString().padStart(3, '0');
+            if (currentTile === 100) {
+                document.getElementById('overlay').style.display = 'flex';
+            } else {
+                isMoving = false;
+                document.getElementById('roll-btn').disabled = false;
+            }
+        }
+
+        function jumpTo(idx, dur, isLadder = false) {
+            return new Promise(res => {
+                const target = platforms[idx].position;
+                gsap.to(player.position, { x: target.x, z: target.z, duration: dur, ease: "power1.inOut" });
+                gsap.to(player.position, { 
+                    y: Math.max(player.position.y, target.y) + (isLadder ? 4 : 2.5), 
+                    duration: dur/2, yoyo: true, repeat: 1, ease: "power2.out",
+                    onComplete: () => { player.position.y = target.y + 1; res(); }
+                });
+            }); 
+        }
+
+        function slideDown(idx) {
+            return new Promise(res => {
+                const target = platforms[idx].position;
+                gsap.to(player.position, {
+                    x: target.x, y: target.y + 1, z: target.z,
+                    duration: 1.5, ease: "bounce.out", onComplete: res
+                });
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const t = Date.now() * 0.0004;
+            
+            // Animate Power-Ups
+            Object.values(powerUpMeshes).forEach(mesh => {
+                if (mesh.visible) {
+                    mesh.rotation.y += 0.02;
+                    mesh.position.y += Math.sin(Date.now() * 0.005) * 0.005;
+                }
+            });
+
+            verticalOffset = THREE.MathUtils.lerp(verticalOffset, targetVerticalOffset, 0.1);
+            
+            const baseCamX = player.position.x + Math.sin(t) * 15;
+            const baseCamZ = player.position.z + Math.cos(t) * 15;
+            const baseCamY = player.position.y + 12;
+
+            const finalCamY = baseCamY - verticalOffset;
+            
+            const targetPos = new THREE.Vector3(baseCamX, finalCamY, baseCamZ);
+            camera.position.lerp(targetPos, 0.05);
+
+            camera.lookAt(player.position.x, player.position.y + 1 - verticalOffset, player.position.z);
+            
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
